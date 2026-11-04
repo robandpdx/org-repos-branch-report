@@ -47,6 +47,7 @@ CSV_COLUMNS = [
     "branch_has_pr",
     "commits_behind_default",
     "commits_ahead_default",
+    "branch_merged",
     "pr_number",
     "pr_url",
     "pr_state",
@@ -58,7 +59,6 @@ CSV_COLUMNS = [
     "pr_last_workflow_run_at",
     "pr_reviewers_requested",
     "pr_approvals_received",
-    "pr_is_draft",
 ]
 
 RATE_LIMIT_FIELDS = "rateLimit { cost remaining resetAt }"
@@ -409,6 +409,29 @@ def fetch_comparisons(client, org, repo_name, default_branch, branch_names):
     return results
 
 
+def pr_state(pr):
+    """Return ``Draft``, ``Open`` or ``Closed`` (merged pull requests are ``Closed``)."""
+    if pr["state"] != "OPEN":
+        return "Closed"
+    return "Draft" if pr.get("isDraft") else "Open"
+
+
+def branch_merged(is_default, ahead, pr):
+    """Return whether a branch has been merged into the default branch.
+
+    A branch counts as merged when its pull request was merged (this also covers squash
+    and rebase merges) or when it has no commits that are not on the default branch.
+    Returns ``None`` when this can't be determined.
+    """
+    if is_default:
+        return False
+    if pr and pr.get("state") == "MERGED":
+        return True
+    if ahead is None:
+        return None
+    return ahead == 0
+
+
 def summarize_pr(pr):
     """Flatten the GraphQL pull request node into the report's PR columns."""
     if not pr:
@@ -453,7 +476,7 @@ def summarize_pr(pr):
     return {
         "pr_number": pr["number"],
         "pr_url": pr["url"],
-        "pr_state": pr["state"],
+        "pr_state": pr_state(pr),
         "pr_created_at": pr["createdAt"],
         "pr_opened_by": (pr.get("author") or {}).get("login", "ghost"),
         "pr_contributors": LIST_SEPARATOR.join(
@@ -464,7 +487,6 @@ def summarize_pr(pr):
         "pr_last_workflow_run_at": max(workflow_dates, key=_parse_time) if workflow_dates else "",
         "pr_reviewers_requested": LIST_SEPARATOR.join(sorted(requested)),
         "pr_approvals_received": LIST_SEPARATOR.join(sorted(set(approvals))),
-        "pr_is_draft": str(bool(pr["isDraft"])).lower(),
     }
 
 
@@ -524,6 +546,8 @@ def build_rows(repo, branches, comparisons, now):
         prs = (branch.get("associatedPullRequests") or {}).get("nodes") or []
         pr = prs[0] if prs else None
         row["branch_has_pr"] = str(pr is not None).lower()
+        merged = branch_merged(is_default, (comparisons.get(name) or {}).get("ahead"), pr)
+        row["branch_merged"] = "" if merged is None else str(merged).lower()
         row.update(summarize_pr(pr))
         rows.append(row)
     return rows

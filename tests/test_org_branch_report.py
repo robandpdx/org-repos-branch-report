@@ -158,6 +158,7 @@ def test_generate_report_rows():
     assert main["commits_ahead_default"] == "0" and main["commits_behind_default"] == "0"
     assert main["branch_created_at"] == REPO["createdAt"]
     assert main["branch_has_pr"] == "false" and main["pr_number"] == ""
+    assert main["branch_merged"] == "false"
 
     assert feature["branch_created_at"] == "2024-05-10T00:00:00Z"
     assert feature["branch_last_push_at"] == "2024-05-15T00:00:00Z"
@@ -172,10 +173,12 @@ def test_generate_report_rows():
     assert feature["pr_checks_passing"] == "true"
     assert feature["pr_last_workflow_run_at"] == "2024-06-21T00:00:00Z"
     assert feature["pr_last_activity_at"] == "2024-06-20T00:00:00Z"
-    assert feature["pr_is_draft"] == "false"
+    assert feature["pr_state"] == "Open"
+    assert feature["branch_merged"] == "false"
 
     assert old["commits_behind_default"] == "40"
     assert old["commits_ahead_default"] == "0"
+    assert old["branch_merged"] == "true"
     assert old["branch_created_at"] == "2023-01-01T00:00:00Z"
 
     assert empty["repository"] == "empty"
@@ -187,7 +190,7 @@ def test_summarize_pr_failing_checks_and_draft():
     pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = {"state": "FAILURE"}
     summary = report.summarize_pr(pr)
     assert summary["pr_checks_passing"] == "false"
-    assert summary["pr_is_draft"] == "true"
+    assert summary["pr_state"] == "Draft"
     assert summary["pr_opened_by"] == "ghost"
 
     pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = None
@@ -315,3 +318,37 @@ def test_main_removes_incomplete_output(monkeypatch, tmp_path):
 )
 def test_graphql_url(api_url, expected):
     assert report.GitHubClient("t", api_url=api_url, session=FakeSession(None)).url == expected
+
+
+@pytest.mark.parametrize(
+    "state, is_draft, expected",
+    [("OPEN", False, "Open"), ("OPEN", True, "Draft"), ("CLOSED", True, "Closed"),
+     ("CLOSED", False, "Closed"), ("MERGED", False, "Closed")],
+)
+def test_pr_state(state, is_draft, expected):
+    assert report.pr_state({"state": state, "isDraft": is_draft}) == expected
+
+
+@pytest.mark.parametrize(
+    "is_default, ahead, pr, expected",
+    [
+        (True, 0, None, False),
+        (False, 0, None, True),
+        (False, 3, None, False),
+        (False, 3, {"state": "MERGED"}, True),  # squash/rebase merge
+        (False, 3, {"state": "CLOSED"}, False),
+        (False, None, None, None),
+        (False, None, {"state": "MERGED"}, True),
+    ],
+)
+def test_branch_merged(is_default, ahead, pr, expected):
+    assert report.branch_merged(is_default, ahead, pr) is expected
+
+
+def test_branch_merged_blank_when_compare_unknown():
+    repo = dict(REPO)
+    branches = [{"name": "x", "target": {"committedDate": "2024-06-01T00:00:00Z"},
+                 "associatedPullRequests": {"nodes": []}}]
+    row = report.build_rows(repo, branches, {}, NOW)[0]
+    assert row["branch_merged"] == ""
+    assert "pr_is_draft" not in report.CSV_COLUMNS

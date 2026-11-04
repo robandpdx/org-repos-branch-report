@@ -89,13 +89,14 @@ A repository with no branches (an empty repository) gets one row, with the branc
 | `branch_has_pr` | `true` if a pull request uses this branch as its head branch |
 | `commits_behind_default` | Commits on the default branch that are not on this branch |
 | `commits_ahead_default` | Commits on this branch that are not on the default branch |
+| `branch_merged` | `true` if the branch has been merged into the default branch, `false` otherwise (always `false` for the default branch). See notes. |
 
 ### Pull request columns (blank when `branch_has_pr` is `false`)
 
 | Column | Description |
 | --- | --- |
 | `pr_number`, `pr_url` | The pull request |
-| `pr_state` | `OPEN`, `CLOSED` or `MERGED` |
+| `pr_state` | `Draft`, `Open` or `Closed`. Merged PRs are `Closed`; see `branch_merged`. |
 | `pr_created_at` | Date the PR was created |
 | `pr_opened_by` | Login of the PR author |
 | `pr_contributors` | Everyone who took part in the PR: author, commenters, reviewers, etc. |
@@ -104,7 +105,6 @@ A repository with no branches (an empty repository) gets one row, with the branc
 | `pr_last_workflow_run_at` | Date of the most recent GitHub Actions workflow run on the PR's head commit |
 | `pr_reviewers_requested` | Users requested as reviewers, including those who have already reviewed. Requests that were later removed are excluded. Teams are shown as `team:<slug>`. |
 | `pr_approvals_received` | Users whose latest review is an approval |
-| `pr_is_draft` | `true` / `false` |
 
 Columns that hold several users separate them with `;`. Dates are ISO 8601 in UTC, for example `2024-05-10T14:03:00Z`.
 
@@ -114,8 +114,9 @@ Columns that hold several users separate them with `;`. Dates are ISO 8601 in UT
   - `branch_last_push_at` is the commit date of the branch's latest commit.
   - `branch_created_at` is the commit date of the oldest commit that is on the branch but not on the default branch. If the branch has no such commits, the latest commit date is used. For the default branch, the repository's creation date is used.
   - The push counts per window (`repo_branches_pushed_last_*_days`) are based on `branch_last_push_at`.
-- If several pull requests use a branch as their head, the most recently updated one is reported. It can be open, closed or merged; see `pr_state`.
+- If several pull requests use a branch as their head, the most recently updated one is reported. It can be a draft, open, closed or merged; see `pr_state` and `branch_merged`.
 - To keep each request small, PR lists are capped: 100 contributors, 100 reviewers and review requests, and 50 check suites.
+- `branch_merged` is `true` when the branch's pull request was merged (this covers squash and rebase merges) or the branch has no commits that aren't on the default branch (`commits_ahead_default` is `0`). A new branch with no commits of its own therefore also shows as merged. The column is blank if the branch couldn't be compared with the default branch and has no merged pull request.
 - If a branch can't be compared with the default branch (for example, the comparison times out on a very large repository), the script logs a warning and leaves `commits_behind_default` and `commits_ahead_default` blank.
 
 ## How API usage is kept efficient
